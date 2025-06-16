@@ -11,16 +11,19 @@ services:
       KAFKA_KRAFT_CLUSTER_ID: practicum
       KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: SSL:SSL,CONTROLLER:SSL
       KAFKA_CFG_INTER_BROKER_LISTENER_NAME: SSL
-      KAFKA_CFG_SSL_CLIENT_AUTH: required
+      KAFKA_CFG_SSL_CLIENT_AUTH: none
       KAFKA_CFG_SSL_TRUSTSTORE_LOCATION: /bitnami/kafka/config/certs/kafka.truststore.jks
       KAFKA_CFG_SSL_TRUSTSTORE_PASSWORD: kafka-password
       KAFKA_CFG_SSL_KEYSTORE_LOCATION: /bitnami/kafka/config/certs/kafka.keystore.jks
       KAFKA_CFG_SSL_KEYSTORE_PASSWORD: kafka-password
       KAFKA_CFG_SSL_KEY_PASSWORD: kafka-password
+      KAFKA_CFG_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
+      KAFKA_CFG_ALLOW_EVERYONE_IF_NO_ACL_FOUND: true
+      KAFKA_CFG_SUPER_USERS: User:ANONYMOUS
       BITNAMI_DEBUG: true
     networks:
       - kafka_net
-  
+
   kafka-0:
     <<: *kafka-common
     hostname: kafka-0
@@ -93,15 +96,15 @@ services:
     networks:
       - kafka_net
 
-  producer-consumer:
-    image: golang:1.24-alpine
-    working_dir: /app
+  kafka-setup:
+    image: bitnami/kafka:3.9
+    working_dir: /setup
     volumes:
-      - .:/app
-      - ./clients-creds:/app/clients-creds
+      - ./setup:/setup
+      - ./kafka-0-creds:/certs:ro
     environment:
-      - CGO_ENABLED=1
-    command: sh -c "apk add --no-cache build-base librdkafka-dev && go build -tags musl -o main . && ./main"
+      KAFKA_CFG_BOOTSTRAP_SERVERS: kafka-0:9093,kafka-1:9093,kafka-2:9093
+    command: sh -c "chmod +x /setup/setup-kafka.sh && /setup/setup-kafka.sh"
     depends_on:
       kafka-0:
         condition: service_healthy
@@ -109,6 +112,22 @@ services:
         condition: service_healthy
       kafka-2:
         condition: service_healthy
+    networks:
+      - kafka_net
+
+  producer-consumer:
+    image: golang:1.24-alpine
+    working_dir: /app
+    volumes:
+      - .:/app
+      - ./clients-creds:/app/clients-creds
+      - ./ca.crt:/app/ca.crt:ro
+    environment:
+      - CGO_ENABLED=1
+    command: sh -c "apk add --no-cache build-base librdkafka-dev && go build -tags musl -o main . && ./main"
+    depends_on:
+      kafka-setup:
+        condition: service_completed_successfully
     restart: unless-stopped
     networks:
       - kafka_net
